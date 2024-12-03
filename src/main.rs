@@ -199,6 +199,9 @@ async fn ask_question(
     if question_trim.is_empty() {
         return Err(Error::TooShort);
     }
+    if question_trim.contains('\n') {
+        return Err(Error::NoNewlines);
+    }
 
     query!(
         "INSERT INTO questions (question, submitted_time) VALUES (?1, ?2)",
@@ -356,6 +359,8 @@ enum Error {
     TooLong,
     #[error("Too short!")]
     TooShort,
+    #[error("No newlines allowed!")]
+    NoNewlines,
 }
 
 impl IntoResponse for Error {
