@@ -1,5 +1,25 @@
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-color: #000000;
+    --text-color: #ffffff;
+    --question-bg-color: #333333;
+    --answer-bg-color: #666666;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-color: #ffffff;
+    --text-color: #000000;
+    --question-bg-color: #cccccc;
+    --answer-bg-color: #aaaaaa;
+  }
+}
+
 * {
   font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
 }
 
 .ask-question {
@@ -19,11 +39,11 @@ div.question {
 }
 
 .question {
-  background-color: #cccccc;
+  background-color: var(--question-bg-color);
 }
 
 .question > .time {
-  background-color: #cccccc;
+  background-color: var(--question-bg-color);
 }
 
 div.question {
@@ -46,24 +66,10 @@ div.time {
 
 .answer {
   border-radius: 3px;
-  background-color: #aaaaaa;
+  background-color: var(--answer-bg-color);
   padding: 0.5ch;
 }
 
 .answer > .time {
-  background-color: #aaaaaa;
-}
-
-@media (prefers-color-scheme: dark) {
-  * {
-    background-color: #000000;
-    color: #ffffff;
-  }
-}
-
-@media (prefers-color-scheme: light) {
-  * {
-    background-color: #ffffff;
-    color: #000000;
-  }
+  background-color: var(--answer-bg-color);
 }

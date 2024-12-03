@@ -20,6 +20,7 @@ use sqlx::{
 };
 use tera::{Context, Tera};
 use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder};
+use tower_sombrero::{csp::CspNonce, headers::{ContentSecurityPolicy, CspSource}, Sombrero};
 
 const DEFAULT_TEMPLATES: [(&str, &str); 6] = [
     ("base.jinja", include_str!("../templates/base.jinja")),
@@ -41,12 +42,19 @@ fn main() {
     let config: Config = toml::from_str(&config).expect("Invalid config file");
 
     let templates = if let Some(path) = config.template_path {
-        Tera::new(&format!("{path}/**/*.{{jinja,css}}")).expect("Tera parse failed")
+        let mut tera = Tera::new(&format!("{path}/**/*.{{jinja,css}}")).expect("Tera parse failed");
+
+        tera.autoescape_on(vec![".html", ".jinja"]);
+        tera
     } else {
         let mut tera = Tera::default();
         tera.add_raw_templates(DEFAULT_TEMPLATES).unwrap();
+        tera.autoescape_on(vec![".html", ".jinja"]);
         tera
     };
+
+    let csp = ContentSecurityPolicy::strict_default().remove_base_uri().script_src([CspSource::None]).style_src([CspSource::Nonce]);
+    let sombrero = Sombrero::default().content_security_policy(csp);
 
     let auth_layer = axum::middleware::from_fn_with_state(config.password.clone(), auth_layer);
     let router = Router::new()
@@ -55,7 +63,8 @@ fn main() {
         .layer(auth_layer)
         .route("/style.css", get(style))
         .route("/", get(get_questions).post(ask_question))
-        .route("/auth", get(auth_page).post(auth_set));
+        .route("/auth", get(auth_page).post(auth_set))
+        .layer(sombrero);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 
@@ -159,14 +168,16 @@ fn default_false() -> bool {
 
 async fn auth_page(
     State(state): State<AppState>,
+    CspNonce(nonce): CspNonce,
     Query(args): Query<AuthPageArgs>,
 ) -> Result<Html<String>, Error> {
     let mut context = Context::new();
     context.insert("bad", &args.bad);
+    context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("auth.jinja", &context)?))
 }
 
-async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Error> {
+async fn get_questions(State(state): State<AppState>, CspNonce(nonce): CspNonce) -> Result<Html<String>, Error> {
     let answers: Vec<Answer> = query!(
         "SELECT questions.id, questions.question, questions.submitted_time, \
         questions.content_warning, answers.answer, answers.answer_time \
@@ -191,8 +202,10 @@ async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Er
         }
     })
     .collect();
+
     let mut context = Context::new();
     context.insert("answers", &answers);
+    context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("index.jinja", &context)?))
 }
 
@@ -345,7 +358,7 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
     Ok(())
 }
 
-async fn answer_page(State(state): State<AppState>) -> Result<Html<String>, Error> {
+async fn answer_page(State(state): State<AppState>, CspNonce(nonce): CspNonce) -> Result<Html<String>, Error> {
     let questions: Vec<Question> = query!(
         "SELECT questions.id, questions.question, \
         questions.submitted_time, questions.content_warning \
@@ -366,6 +379,7 @@ async fn answer_page(State(state): State<AppState>) -> Result<Html<String>, Erro
 
     let mut context = Context::new();
     context.insert("questions", &questions);
+    context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("answer.jinja", &context)?))
 }
 
