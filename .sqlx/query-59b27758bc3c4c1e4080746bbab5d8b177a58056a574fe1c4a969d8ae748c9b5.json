@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT questions.question, answers.answer FROM questions LEFT JOIN answers WHERE answers.id = ?1 AND questions.id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "question",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "answer",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "59b27758bc3c4c1e4080746bbab5d8b177a58056a574fe1c4a969d8ae748c9b5"
+}

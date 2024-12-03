@@ -1,0 +1,15 @@
+{% extends "base.jinja" %}
+{% block body %}
+  {% if answers | length == 0 %}
+    <h2>No questions yet! Wanna be the first to ask?</h2>
+  {% endif %}
+  {% for answer in answers %}
+    {{ answer.question.question }}:<br />
+    {{ answer.answer }}
+  {% endfor %}
+  <form method="post">
+    <label for="question">What's your question?</label>
+    <textarea name="question" id="question"></textarea>
+    <button type="submit">Send!</button>
+  </form>
+{% endblock body %}

@@ -1,0 +1,14 @@
+{
+  "name": "valk-prettier",
+  "type": "module",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "prettier": "prettier . -w",
+    "prettier-check": "prettier . --check"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.1",
+    "prettier-plugin-jinja-template": "^2.0.0"
+  }
+}

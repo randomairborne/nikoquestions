@@ -1,0 +1,10 @@
+{% extends "base.jinja" %}
+{% block body %}
+  <form method="post">
+    {% if bad %}
+      <span>Bad password!</span><br />
+    {% endif %}
+    <label for="password">Password: </label>
+    <input type="password" name="password" id="password" />
+  </form>
+{% endblock body %}

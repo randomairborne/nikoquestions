@@ -1,0 +1,16 @@
+{% extends "base.jinja" %}
+{% block body %}
+  {% if questions | length == 0 %}
+    <h2>All questions answered!</h2>
+  {% endif %}
+  {% for question in questions %}
+    {{ question.question }}
+    <form method="post">
+      <input name="id" value="{{ question.id }}" hidden />
+      <label for="answer">Response: </label>
+      <textarea name="answer" id="answer"></textarea>
+      <button type="submit">Submit!</button>
+      <button type="submit" formaction="/delete" formmethod="post">Delete!</button>
+    </form>
+  {% endfor %}
+{% endblock body %}
