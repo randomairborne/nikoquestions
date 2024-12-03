@@ -3,4 +3,3 @@ password = "password"
 mastodon_api_token =  "" # https://example.com/settings/applications
 mastodon_api_url = "https://mastodon.social" # No trailing slash!!
 template_path = "templates"
-
