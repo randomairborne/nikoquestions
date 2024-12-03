@@ -1,14 +1,18 @@
-use std::{net::SocketAddr, sync::Arc, time::UNIX_EPOCH};
+use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::UNIX_EPOCH};
 
 use axum::{
     extract::{Query, Request, State},
+    http::HeaderName,
     middleware::Next,
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
     Form, Router,
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
-use reqwest::{header::HeaderValue, header::AUTHORIZATION, Client};
+use reqwest::{
+    header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE},
+    Client,
+};
 use sqlx::{
     query,
     sqlite::{SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
@@ -17,11 +21,13 @@ use sqlx::{
 use tera::{Context, Tera};
 use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder};
 
-const DEFAULT_TEMPLATES: [(&str, &str); 4] = [
+const DEFAULT_TEMPLATES: [(&str, &str); 6] = [
     ("base.jinja", include_str!("../templates/base.jinja")),
     ("index.jinja", include_str!("../templates/index.jinja")),
     ("answer.jinja", include_str!("../templates/answer.jinja")),
     ("auth.jinja", include_str!("../templates/auth.jinja")),
+    ("macros.jinja", include_str!("../templates/macros.jinja")),
+    ("style.css", include_str!("../templates/style.css")),
 ];
 
 const MAX_QUESTION_LEN: usize = 10_000;
@@ -35,7 +41,7 @@ fn main() {
     let config: Config = toml::from_str(&config).expect("Invalid config file");
 
     let templates = if let Some(path) = config.template_path {
-        Tera::new(&format!("{path}/**/*.jinja")).expect("Tera parse failed")
+        Tera::new(&format!("{path}/**/*.{{jinja,css}}")).expect("Tera parse failed")
     } else {
         let mut tera = Tera::default();
         tera.add_raw_templates(DEFAULT_TEMPLATES).unwrap();
@@ -47,6 +53,7 @@ fn main() {
         .route("/answer", get(answer_page).post(answer_form))
         .route("/delete", post(delete_question))
         .layer(auth_layer)
+        .route("/style.css", get(style))
         .route("/", get(get_questions).post(ask_question))
         .route("/auth", get(auth_page).post(auth_set));
 
@@ -87,6 +94,13 @@ fn main() {
                     .expect("Invalid token bytes"),
             ),
             api_url: format!("{}/api/v1/statuses", cfg.mastodon_api_url).into(),
+        }),
+        ntfy_config: config.ntfy_config.map(|cfg| NtfyState {
+            api_auth: Arc::new(
+                HeaderValue::from_str(&format!("Bearer {}", cfg.ntfy_api_token))
+                    .expect("Invalid token bytes"),
+            ),
+            api_url: cfg.ntfy_api_url.into(),
         }),
     };
 
@@ -155,7 +169,7 @@ async fn auth_page(
 async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Error> {
     let answers: Vec<Answer> = query!(
         "SELECT questions.id, questions.question, questions.submitted_time, \
-        answers.answer, answers.answer_time \
+        questions.content_warning, answers.answer, answers.answer_time \
         FROM questions \
         LEFT JOIN answers WHERE answers.id = questions.id \
         ORDER BY answers.answer_time"
@@ -168,6 +182,7 @@ async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Er
             id: row.id,
             question: row.question,
             submitted_time: row.submitted_time,
+            content_warning: row.content_warning,
         };
         Answer {
             answer: row.answer,
@@ -184,6 +199,7 @@ async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Er
 #[derive(serde::Deserialize)]
 struct FormAskQuestion {
     question: String,
+    content_warning: String,
 }
 
 async fn ask_question(
@@ -203,38 +219,81 @@ async fn ask_question(
         return Err(Error::NoNewlines);
     }
 
+    let trimmed_content_warning = question.content_warning.trim();
+
+    let content_warning = if trimmed_content_warning.is_empty() {
+        None
+    } else {
+        Some(trimmed_content_warning.to_owned())
+    };
+
+    ntfy_question(&state, question_trim).await?;
+
     query!(
-        "INSERT INTO questions (question, submitted_time) VALUES (?1, ?2)",
+        "INSERT INTO questions (question, submitted_time, content_warning) VALUES (?1, ?2, ?3)",
         question_trim,
-        now
+        now,
+        content_warning
     )
     .execute(&state.db)
     .await?;
     Ok(Redirect::to("/"))
 }
 
+async fn ntfy_question(state: &AppState, question: &str) -> Result<(), Error> {
+    let Some(config) = &state.ntfy_config else {
+        return Ok(());
+    };
+    state
+        .client
+        .post(config.api_url.as_ref())
+        .header(AUTHORIZATION, config.api_auth.as_ref())
+        .body(question.to_owned())
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
+}
+
 #[derive(serde::Deserialize)]
 struct FormAnswer {
     id: i64,
     answer: String,
+    content_warning: String,
 }
 
 async fn answer_form(
     State(state): State<AppState>,
-    Form(args): Form<FormAnswer>,
+    Form(answer): Form<FormAnswer>,
 ) -> Result<Redirect, Error> {
     let now = now_secs();
-    let answer_trim = args.answer.trim();
+    let answer_trim = answer.answer.trim();
     query!(
         "INSERT INTO answers (id, answer, answer_time) VALUES (?1, ?2, ?3)",
-        args.id,
+        answer.id,
         answer_trim,
         now
     )
     .execute(&state.db)
     .await?;
 
-    answer_mastodon(&state, args.id).await?;
+    let trimmed_content_warning = answer.content_warning.trim();
+
+    let content_warning = if trimmed_content_warning.is_empty() {
+        None
+    } else {
+        Some(trimmed_content_warning.to_owned())
+    };
+
+    query!(
+        "UPDATE questions SET content_warning = ?2 WHERE id = ?1",
+        answer.id,
+        content_warning
+    )
+    .execute(&state.db)
+    .await?;
+
+    answer_mastodon(&state, answer.id).await?;
 
     Ok(Redirect::to("/answer"))
 }
@@ -242,7 +301,7 @@ async fn answer_form(
 #[derive(serde::Serialize)]
 struct MastodonPost {
     status: String,
-    spoiler_text: &'static str,
+    spoiler_text: Cow<'static, str>,
     language: &'static str,
     visibility: &'static str,
 }
@@ -253,7 +312,7 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
     };
 
     let answer = query!(
-        "SELECT questions.question, answers.answer FROM questions \
+        "SELECT questions.question, questions.content_warning, answers.answer FROM questions \
         LEFT JOIN answers WHERE answers.id = ?1 AND questions.id = ?1",
         id
     )
@@ -262,9 +321,15 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
 
     let status = format!("{}\n{}", answer.question, answer.answer);
 
+    let spoiler_text = if let Some(cw) = answer.content_warning {
+        Cow::Owned(format!("anonymous question response (cw {cw})"))
+    } else {
+        Cow::Borrowed("anonymous question response")
+    };
+
     let post = MastodonPost {
         status,
-        spoiler_text: "anonymous question response",
+        spoiler_text,
         language: "en",
         visibility: "public",
     };
@@ -282,7 +347,8 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
 
 async fn answer_page(State(state): State<AppState>) -> Result<Html<String>, Error> {
     let questions: Vec<Question> = query!(
-        "SELECT questions.id, questions.question, questions.submitted_time \
+        "SELECT questions.id, questions.question, \
+        questions.submitted_time, questions.content_warning \
         FROM questions WHERE NOT EXISTS
         (SELECT id FROM answers WHERE answers.id = questions.id)
         ORDER BY questions.submitted_time"
@@ -294,6 +360,7 @@ async fn answer_page(State(state): State<AppState>) -> Result<Html<String>, Erro
         id: row.id,
         question: row.question,
         submitted_time: row.submitted_time,
+        content_warning: row.content_warning,
     })
     .collect();
 
@@ -312,6 +379,14 @@ async fn delete_question(
     Ok(Redirect::to("/answer"))
 }
 
+async fn style(
+    State(state): State<AppState>,
+) -> Result<([(HeaderName, HeaderValue); 1], String), Error> {
+    let css = state.tera.render("style.css", &Context::new())?;
+    static CSS_CTYPE: HeaderValue = HeaderValue::from_static("text/css;charset=utf-8");
+    Ok(([(CONTENT_TYPE, CSS_CTYPE.clone())], css))
+}
+
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -324,6 +399,7 @@ struct AppState {
     tera: Arc<Tera>,
     client: Client,
     mastodon_config: Option<MastodonState>,
+    ntfy_config: Option<NtfyState>,
 }
 
 #[derive(serde::Deserialize)]
@@ -333,6 +409,8 @@ struct Config {
     password: Arc<str>,
     #[serde(flatten)]
     mastodon_config: Option<MastodonConfig>,
+    #[serde(flatten)]
+    ntfy_config: Option<NtfyConfig>,
 }
 
 #[derive(Clone)]
@@ -345,6 +423,18 @@ struct MastodonState {
 struct MastodonConfig {
     mastodon_api_token: String,
     mastodon_api_url: String,
+}
+
+#[derive(Clone)]
+struct NtfyState {
+    api_auth: Arc<HeaderValue>,
+    api_url: Arc<str>,
+}
+
+#[derive(serde::Deserialize)]
+struct NtfyConfig {
+    ntfy_api_token: String,
+    ntfy_api_url: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -386,4 +476,5 @@ pub struct Question {
     id: i64,
     question: String,
     submitted_time: i64,
+    content_warning: Option<String>,
 }

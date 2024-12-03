@@ -1,15 +1,33 @@
 {% extends "base.jinja" %}
+{% import "macros.jinja" as macros %}
 {% block body %}
+  <h1>Leave an anonymous message</h1>
+  <form method="post" class="ask-question">
+    <div>
+      <label for="question">What's your question?</label>
+      <input name="question" id="question" />
+    </div>
+    <div>
+      <label for="content_warning">Optional content warning</label>
+      <input name="content_warning" id="content_warning" />
+    </div>
+    <button type="submit" class="submitbtn">Send!</button>
+  </form>
   {% if answers | length == 0 %}
     <h2>No questions yet! Wanna be the first to ask?</h2>
   {% endif %}
   {% for answer in answers %}
-    {{ answer.question.question }}:<br />
-    {{ answer.answer }}
+    <div class="question">
+      {% if answer.question.content_warning %}
+        <details class="question">
+          <summary class="question">
+            {{ answer.question.content_warning }}
+          </summary>
+          {{ macros::answer_macro(answer=answer) }}
+        </details>
+      {% else %}
+        {{ macros::answer_macro(answer=answer) }}
+      {% endif %}
+    </div>
   {% endfor %}
-  <form method="post">
-    <label for="question">What's your question?</label>
-    <input name="question" id="question" />
-    <button type="submit">Send!</button>
-  </form>
 {% endblock body %}

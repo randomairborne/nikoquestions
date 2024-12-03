@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT questions.question, questions.content_warning, answers.answer FROM questions LEFT JOIN answers WHERE answers.id = ?1 AND questions.id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "question",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_warning",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "answer",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "baa3e33bda382011064310aa59da6c6c4c547de0fb6ae500274d2a294f28deac"
+}

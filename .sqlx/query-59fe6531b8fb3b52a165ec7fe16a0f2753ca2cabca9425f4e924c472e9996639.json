@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT questions.id, questions.question, questions.submitted_time FROM questions WHERE NOT EXISTS\n        (SELECT id FROM answers WHERE answers.id = questions.id)\n        ORDER BY questions.submitted_time",
+  "query": "SELECT questions.id, questions.question, questions.submitted_time, questions.content_warning FROM questions WHERE NOT EXISTS\n        (SELECT id FROM answers WHERE answers.id = questions.id)\n        ORDER BY questions.submitted_time",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "name": "submitted_time",
         "ordinal": 2,
         "type_info": "Integer"
+      },
+      {
+        "name": "content_warning",
+        "ordinal": 3,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -25,8 +30,9 @@
     "nullable": [
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "2421a63f1298bcf5150b68f88cc63cd9f0b49c33606ec4c14ae7515589693b77"
+  "hash": "59fe6531b8fb3b52a165ec7fe16a0f2753ca2cabca9425f4e924c472e9996639"
 }

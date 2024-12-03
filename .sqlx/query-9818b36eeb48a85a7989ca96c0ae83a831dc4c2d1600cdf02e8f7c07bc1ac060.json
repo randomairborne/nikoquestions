@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT questions.id, questions.question, questions.submitted_time, answers.answer, answers.answer_time FROM questions LEFT JOIN answers WHERE answers.id = questions.id ORDER BY answers.answer_time",
+  "query": "SELECT questions.id, questions.question, questions.submitted_time, questions.content_warning, answers.answer, answers.answer_time FROM questions LEFT JOIN answers WHERE answers.id = questions.id ORDER BY answers.answer_time",
   "describe": {
     "columns": [
       {
@@ -19,13 +19,18 @@
         "type_info": "Integer"
       },
       {
-        "name": "answer",
+        "name": "content_warning",
         "ordinal": 3,
         "type_info": "Text"
       },
       {
-        "name": "answer_time",
+        "name": "answer",
         "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "answer_time",
+        "ordinal": 5,
         "type_info": "Integer"
       }
     ],
@@ -36,9 +41,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "5700e2a53259dc24a91171543a6197d93ed40d3b13fc0ecc1fca854f6f2ee2eb"
+  "hash": "9818b36eeb48a85a7989ca96c0ae83a831dc4c2d1600cdf02e8f7c07bc1ac060"
 }

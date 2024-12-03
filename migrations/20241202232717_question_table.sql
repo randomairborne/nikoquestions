@@ -2,7 +2,8 @@
 CREATE TABLE questions (
     id INTEGER PRIMARY KEY,
     question TEXT NOT NULL,
-    submitted_time INTEGER NOT NULL
+    submitted_time INTEGER NOT NULL,
+    content_warning TEXT
 ) STRICT;
 
 CREATE TABLE answers (

@@ -1,0 +1,14 @@
+{% macro answer_macro(answer) %}
+  <div class="question">
+    {{ answer.question.question }}
+    <div class="time">
+      {{ answer.answer_time | date(format="%Y-%m-%d %H:%M") }} UTC
+    </div>
+  </div>
+  <div class="answer">
+    {{ answer.answer }}
+    <div class="time">
+      {{ answer.question.submitted_time | date(format="%Y-%m-%d %H:%M") }} UTC
+    </div>
+  </div>
+{% endmacro answer_macro %}

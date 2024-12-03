@@ -1,0 +1,69 @@
+* {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.ask-question {
+  display: flex;
+  flex-direction: column;
+  max-width: fit-content;
+}
+
+.submitbtn {
+  max-width: fit-content;
+}
+
+div.question {
+  border-radius: 5px;
+  padding: 1ch;
+  margin: 0.5ch;
+}
+
+.question {
+  background-color: #cccccc;
+}
+
+.question > .time {
+  background-color: #cccccc;
+}
+
+div.question {
+  display: flex;
+  flex-direction: column;
+  max-width: fit-content;
+}
+
+span.question::before {
+  content: "> ";
+}
+
+summary.question::before {
+  content: "cw ";
+}
+
+div.time {
+  font-size: smaller;
+}
+
+.answer {
+  border-radius: 3px;
+  background-color: #aaaaaa;
+  padding: 0.5ch;
+}
+
+.answer > .time {
+  background-color: #aaaaaa;
+}
+
+@media (prefers-color-scheme: dark) {
+  * {
+    background-color: #000000;
+    color: #ffffff;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  * {
+    background-color: #ffffff;
+    color: #000000;
+  }
+}

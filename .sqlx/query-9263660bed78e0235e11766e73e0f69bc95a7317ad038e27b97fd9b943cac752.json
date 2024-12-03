@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO questions (question, submitted_time, content_warning) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "9263660bed78e0235e11766e73e0f69bc95a7317ad038e27b97fd9b943cac752"
+}

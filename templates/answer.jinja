@@ -4,11 +4,17 @@
     <h2>All questions answered!</h2>
   {% endif %}
   {% for question in questions %}
-    {{ question.question }}
+    <div class="question">{{ question.question }}</div>
     <form method="post">
       <input name="id" value="{{ question.id }}" hidden />
       <label for="answer">Response: </label>
-      <textarea name="answer" id="answer"></textarea>
+      <input name="answer" id="answer" />
+      <label for="content_warning">Content warning: </label>
+      <input
+        name="content_warning"
+        id="content_warning"
+        value="{{ question.content_warning }}"
+      />
       <button type="submit">Submit!</button>
       <button type="submit" formaction="/delete" formmethod="post">
         Delete!
