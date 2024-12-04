@@ -1,4 +1,4 @@
-use std::{borrow::Cow, net::SocketAddr, sync::Arc, time::UNIX_EPOCH};
+use std::{borrow::Cow, net::SocketAddr, sync::{Arc, Mutex}, time::{Instant, UNIX_EPOCH}};
 
 use axum::{
     extract::{Query, Request, State},
@@ -9,6 +9,7 @@ use axum::{
     Form, Router,
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
+use blake3::Hash;
 use reqwest::{
     header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE},
     Client,
@@ -56,7 +57,8 @@ fn main() {
     let csp = ContentSecurityPolicy::strict_default().remove_base_uri().script_src([CspSource::None]).style_src([CspSource::Nonce]);
     let sombrero = Sombrero::default().content_security_policy(csp);
 
-    let auth_layer = axum::middleware::from_fn_with_state(config.password.clone(), auth_layer);
+    let pw_hash = blake3::hash(config.password.as_bytes());
+    let auth_layer = axum::middleware::from_fn_with_state(pw_hash, auth_layer);
     let router = Router::new()
         .route("/answer", get(answer_page).post(answer_form))
         .route("/delete", post(delete_question))
@@ -128,14 +130,14 @@ async fn serve(address: SocketAddr, app: Router) -> Result<(), std::io::Error> {
 }
 
 async fn auth_layer(
-    State(password): State<Arc<str>>,
+    State(password): State<Hash>,
     cookies: CookieJar,
     request: Request,
     next: Next,
 ) -> Response {
     if cookies
         .get("questions-auth")
-        .is_some_and(|provided| *provided.value() == *password)
+        .is_some_and(|provided| blake3::hash(provided.value().as_bytes()) == password)
     {
         next.run(request).await
     } else {
@@ -420,7 +422,7 @@ struct AppState {
 struct Config {
     database_path: String,
     template_path: Option<String>,
-    password: Arc<str>,
+    password: String,
     #[serde(flatten)]
     mastodon_config: Option<MastodonConfig>,
     #[serde(flatten)]
