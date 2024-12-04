@@ -1,4 +1,9 @@
-use std::{borrow::Cow, net::SocketAddr, sync::{Arc, Mutex}, time::{Instant, UNIX_EPOCH}};
+use std::{
+    borrow::Cow,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::{Duration, UNIX_EPOCH},
+};
 
 use axum::{
     extract::{Query, Request, State},
@@ -10,6 +15,8 @@ use axum::{
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use blake3::Hash;
+use dashmap::DashSet;
+use rand::{distributions::Alphanumeric, Rng};
 use reqwest::{
     header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE},
     Client,
@@ -20,8 +27,12 @@ use sqlx::{
     SqlitePool,
 };
 use tera::{Context, Tera};
-use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder};
-use tower_sombrero::{csp::CspNonce, headers::{ContentSecurityPolicy, CspSource}, Sombrero};
+use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder, time::Instant};
+use tower_sombrero::{
+    csp::CspNonce,
+    headers::{ContentSecurityPolicy, CspSource},
+    Sombrero,
+};
 
 const DEFAULT_TEMPLATES: [(&str, &str); 6] = [
     ("base.jinja", include_str!("../templates/base.jinja")),
@@ -54,11 +65,15 @@ fn main() {
         tera
     };
 
-    let csp = ContentSecurityPolicy::strict_default().remove_base_uri().script_src([CspSource::None]).style_src([CspSource::Nonce]);
+    let csp = ContentSecurityPolicy::strict_default()
+        .remove_base_uri()
+        .script_src([CspSource::None])
+        .style_src([CspSource::Nonce]);
     let sombrero = Sombrero::default().content_security_policy(csp);
 
-    let pw_hash = blake3::hash(config.password.as_bytes());
-    let auth_layer = axum::middleware::from_fn_with_state(pw_hash, auth_layer);
+    let tokens = Arc::new(DashSet::new());
+
+    let auth_layer = axum::middleware::from_fn_with_state(tokens.clone(), auth_layer);
     let router = Router::new()
         .route("/answer", get(answer_page).post(answer_form))
         .route("/delete", post(delete_question))
@@ -113,6 +128,8 @@ fn main() {
             ),
             api_url: cfg.ntfy_api_url.into(),
         }),
+        password_hash: blake3::hash(config.password.as_bytes()),
+        tokens,
     };
 
     let router = router.with_state(state);
@@ -130,18 +147,23 @@ async fn serve(address: SocketAddr, app: Router) -> Result<(), std::io::Error> {
 }
 
 async fn auth_layer(
-    State(password): State<Hash>,
+    State(tokens): State<Arc<DashSet<String>>>,
     cookies: CookieJar,
     request: Request,
     next: Next,
 ) -> Response {
+    let now = Instant::now();
+    let security_wait =
+        tokio::time::sleep_until(now.checked_add(Duration::from_millis(30)).unwrap_or(now));
     if cookies
         .get("questions-auth")
-        .is_some_and(|provided| blake3::hash(provided.value().as_bytes()) == password)
+        .is_some_and(|provided| tokens.contains(provided.value()))
     {
+        security_wait.await;
         next.run(request).await
     } else {
-        Redirect::to("/auth?bad=true").into_response()
+        security_wait.await;
+        Redirect::to("/auth").into_response()
     }
 }
 
@@ -150,12 +172,26 @@ struct AuthSetArgs {
     password: String,
 }
 
-async fn auth_set(cookies: CookieJar, Form(args): Form<AuthSetArgs>) -> (CookieJar, Redirect) {
-    let cookie = Cookie::build(("questions-auth", args.password))
-        .http_only(true)
-        .secure(true)
-        .build();
-    (cookies.add(cookie), Redirect::to("/answer"))
+async fn auth_set(
+    State(state): State<AppState>,
+    cookies: CookieJar,
+    Form(args): Form<AuthSetArgs>,
+) -> (CookieJar, Redirect) {
+    if blake3::hash(args.password.as_bytes()) == state.password_hash {
+        let new_token: String = rand::thread_rng()
+            .sample_iter(Alphanumeric)
+            .take(64)
+            .map(|c| c as char)
+            .collect();
+        state.tokens.insert(new_token.clone());
+        let cookie = Cookie::build(("questions-auth", new_token))
+            .http_only(true)
+            .secure(true)
+            .build();
+        (cookies.add(cookie), Redirect::to("/answer"))
+    } else {
+        (cookies, Redirect::to("/auth?bad=true"))
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -179,7 +215,10 @@ async fn auth_page(
     Ok(Html(state.tera.render("auth.jinja", &context)?))
 }
 
-async fn get_questions(State(state): State<AppState>, CspNonce(nonce): CspNonce) -> Result<Html<String>, Error> {
+async fn get_questions(
+    State(state): State<AppState>,
+    CspNonce(nonce): CspNonce,
+) -> Result<Html<String>, Error> {
     let answers: Vec<Answer> = query!(
         "SELECT questions.id, questions.question, questions.submitted_time, \
         questions.content_warning, answers.answer, answers.answer_time \
@@ -360,7 +399,10 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
     Ok(())
 }
 
-async fn answer_page(State(state): State<AppState>, CspNonce(nonce): CspNonce) -> Result<Html<String>, Error> {
+async fn answer_page(
+    State(state): State<AppState>,
+    CspNonce(nonce): CspNonce,
+) -> Result<Html<String>, Error> {
     let questions: Vec<Question> = query!(
         "SELECT questions.id, questions.question, \
         questions.submitted_time, questions.content_warning \
@@ -414,6 +456,8 @@ struct AppState {
     db: SqlitePool,
     tera: Arc<Tera>,
     client: Client,
+    tokens: Arc<DashSet<String>>,
+    password_hash: Hash,
     mastodon_config: Option<MastodonState>,
     ntfy_config: Option<NtfyState>,
 }
