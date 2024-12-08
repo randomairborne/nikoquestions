@@ -1,3 +1,4 @@
+bind_address = "0.0.0.0:8080"
 database_path = "nq.db"
 password = "password"
 template_path = "templates"

@@ -1,10 +1,3 @@
-use std::{
-    borrow::Cow,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-    time::{Duration, UNIX_EPOCH},
-};
-
 use axum::{
     extract::{Query, Request, State},
     http::HeaderName,
@@ -25,6 +18,13 @@ use sqlx::{
     query,
     sqlite::{SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
     SqlitePool,
+};
+use std::str::FromStr;
+use std::{
+    borrow::Cow,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::{Duration, UNIX_EPOCH},
 };
 use tera::{Context, Tera};
 use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder, time::Instant};
@@ -83,7 +83,7 @@ fn main() {
         .route("/auth", get(auth_page).post(auth_set))
         .layer(sombrero);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let addr = SocketAddr::from_str(&config.bind_address).expect("Failed to parse bind address");
 
     let rt = RuntimeBuilder::new_current_thread()
         .enable_all()
@@ -464,6 +464,7 @@ struct AppState {
 
 #[derive(serde::Deserialize)]
 struct Config {
+    bind_address: String,
     database_path: String,
     template_path: Option<String>,
     password: String,
