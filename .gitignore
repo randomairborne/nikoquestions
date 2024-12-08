@@ -1,4 +1,5 @@
 /target
+/.idea
 Cargo.lock
 *.db
 *.db-shm
@@ -9,3 +10,4 @@ package-lock.json
 node_modules/
 
 config.toml
+nq.db
