@@ -1,13 +1,13 @@
 {% macro answer_macro(answer) %}
   <div class="question">
     {{ answer.question.question }}
-    <div class="time">
+    <div class="time" data-timestamp="{{ answer.answer_time }}">
       {{ answer.answer_time | date(format="%Y-%m-%d %H:%M") }} UTC
     </div>
   </div>
   <div class="answer">
     {{ answer.answer }}
-    <div class="time">
+    <div class="time" data-timestamp="{{ answer.question.submitted_time }}">
       {{ answer.question.submitted_time | date(format="%Y-%m-%d %H:%M") }} UTC
     </div>
   </div>

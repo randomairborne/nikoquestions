@@ -3,9 +3,6 @@ database_path = "nq.db"
 password = "password"
 template_path = "templates"
 
-# Flip to disable CSP from existing at all
-enable_csp = true
-
 ### Optional Mastodon API integration to autopost responses
 # Generate an API token at https://your.domain/settings/applications
 # It only needs `write:statuses`
