@@ -65,23 +65,26 @@ fn main() {
         tera
     };
 
-    let csp = ContentSecurityPolicy::strict_default()
-        .remove_base_uri()
-        .script_src([CspSource::None])
-        .style_src([CspSource::Nonce]);
-    let sombrero = Sombrero::default().content_security_policy(csp);
-
     let tokens = Arc::new(DashSet::new());
 
     let auth_layer = axum::middleware::from_fn_with_state(tokens.clone(), auth_layer);
-    let router = Router::new()
+    let mut router = Router::new()
         .route("/answer", get(answer_page).post(answer_form))
         .route("/delete", post(delete_question))
         .layer(auth_layer)
         .route("/style.css", get(style))
         .route("/", get(get_questions).post(ask_question))
-        .route("/auth", get(auth_page).post(auth_set))
-        .layer(sombrero);
+        .route("/auth", get(auth_page).post(auth_set));
+
+    if config.enable_csp {
+        let csp = ContentSecurityPolicy::strict_default()
+            .remove_base_uri()
+            .script_src([CspSource::None])
+            .style_src([CspSource::Nonce]);
+        let sombrero = Sombrero::default().content_security_policy(csp);
+
+        router = router.layer(sombrero);
+    }
 
     let addr = SocketAddr::from_str(&config.bind_address).expect("Failed to parse bind address");
 
@@ -467,6 +470,7 @@ struct Config {
     bind_address: String,
     database_path: String,
     template_path: Option<String>,
+    enable_csp: bool,
     password: String,
     mastodon: Option<RemoteServiceConfig>,
     ntfy: Option<RemoteServiceConfig>,

@@ -3,13 +3,20 @@ database_path = "nq.db"
 password = "password"
 template_path = "templates"
 
-[mastodon]
+# Flip to disable CSP from existing at all
+enable_csp = true
+
+### Optional Mastodon API integration to autopost responses
 # Generate an API token at https://your.domain/settings/applications
 # It only needs `write:statuses`
-#api_token = "" # https://example.com/settings/applications
+# Uncomment all the following three lines to enable
+#[mastodon]
+#api_token = ""
 #api_url = "https://mastodon.social" # No trailing slash!!
 
-[ntfy]
+### Optional ntfy.sh integration for push notifs when new question is asked
 # See https://ntfy.sh/docs/publish/#access-tokens
-#api_token = "" # https://ntfy.sh/account
+# Generate token at https://ntfy.sh/account
+#[ntfy]
+#api_token = ""
 #api_url = "https://ntfy.sh" # No trailing slash!!
