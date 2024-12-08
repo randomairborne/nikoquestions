@@ -114,19 +114,19 @@ fn main() {
         db: database_conn,
         tera: Arc::new(templates),
         client: Client::new(),
-        mastodon_config: config.mastodon_config.map(|cfg| MastodonState {
+        mastodon_config: config.mastodon.map(|cfg| MastodonState {
             api_auth: Arc::new(
-                HeaderValue::from_str(&format!("Bearer {}", cfg.mastodon_api_token))
+                HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
                     .expect("Invalid token bytes"),
             ),
-            api_url: format!("{}/api/v1/statuses", cfg.mastodon_api_url).into(),
+            api_url: format!("{}/api/v1/statuses", cfg.api_url).into(),
         }),
-        ntfy_config: config.ntfy_config.map(|cfg| NtfyState {
+        ntfy_config: config.ntfy.map(|cfg| NtfyState {
             api_auth: Arc::new(
-                HeaderValue::from_str(&format!("Bearer {}", cfg.ntfy_api_token))
+                HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
                     .expect("Invalid token bytes"),
             ),
-            api_url: cfg.ntfy_api_url.into(),
+            api_url: cfg.api_url.into(),
         }),
         password_hash: blake3::hash(config.password.as_bytes()),
         tokens,
@@ -467,10 +467,14 @@ struct Config {
     database_path: String,
     template_path: Option<String>,
     password: String,
-    #[serde(flatten)]
-    mastodon_config: Option<MastodonConfig>,
-    #[serde(flatten)]
-    ntfy_config: Option<NtfyConfig>,
+    mastodon: Option<RemoteServiceConfig>,
+    ntfy: Option<RemoteServiceConfig>,
+}
+
+#[derive(serde::Deserialize)]
+struct RemoteServiceConfig {
+    api_token: String,
+    api_url: String,
 }
 
 #[derive(Clone)]
@@ -479,22 +483,10 @@ struct MastodonState {
     api_url: Arc<str>,
 }
 
-#[derive(serde::Deserialize)]
-struct MastodonConfig {
-    mastodon_api_token: String,
-    mastodon_api_url: String,
-}
-
 #[derive(Clone)]
 struct NtfyState {
     api_auth: Arc<HeaderValue>,
     api_url: Arc<str>,
-}
-
-#[derive(serde::Deserialize)]
-struct NtfyConfig {
-    ntfy_api_token: String,
-    ntfy_api_url: String,
 }
 
 #[derive(Debug, thiserror::Error)]

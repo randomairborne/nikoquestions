@@ -1,5 +1,14 @@
 database_path = "nq.db"
 password = "password"
-mastodon_api_token =  "" # https://example.com/settings/applications
-mastodon_api_url = "https://mastodon.social" # No trailing slash!!
 template_path = "templates"
+
+[mastodon]
+# Generate an API token at https://your.domain/settings/applications
+# It only needs `write:statuses`
+#api_token = "" # https://example.com/settings/applications
+#api_url = "https://mastodon.social" # No trailing slash!!
+
+[ntfy]
+# See https://ntfy.sh/docs/publish/#access-tokens
+#api_token = "" # https://ntfy.sh/account
+#api_url = "https://ntfy.sh" # No trailing slash!!
