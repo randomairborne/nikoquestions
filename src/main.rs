@@ -1,3 +1,4 @@
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -142,7 +143,7 @@ fn main() {
     let router = router.with_state(state);
 
     let server = rt.spawn(serve(addr, router));
-    println!("Listening on address: {}", addr);
+    println!("Listening on address: {addr}");
     rt.block_on(server)
         .unwrap()
         .expect("Could not start server");
@@ -156,11 +157,7 @@ async fn serve(address: SocketAddr, app: Router) -> Result<(), std::io::Error> {
 }
 
 fn gen_tera(config: &Config) -> Tera {
-    let mut tera = if let Some(path) = &config.template_path {
-        Tera::new(&format!("{path}/**/*.jinja")).expect("Tera parse failed")
-    } else {
-        Tera::default()
-    };
+    let mut tera = config.template_path.as_ref().map_or_else(Tera::default, |path| Tera::new(&format!("{path}/**/*.jinja")).expect("Tera parse failed"));
 
     tera.autoescape_on(vec![".html", ".jinja"]);
 
@@ -180,7 +177,7 @@ static OCTET_STREAM_HDR: HeaderValue = HeaderValue::from_static("application/oct
 
 fn gen_static_files(config: &Config) -> Arc<HashMap<String, (HeaderValue, Bytes)>> {
     let mut files =
-        HashMap::from(DEFAULT_ASSETS.map(|v| (v.0.to_owned(), (v.1.to_owned(), v.2.to_owned()))));
+        HashMap::from(DEFAULT_ASSETS.map(|v| (v.0.to_owned(), (v.1.clone(), v.2))));
     if let Some(asset_path) = &config.asset_path {
         let dir = std::fs::read_dir(asset_path).expect("asset_path could not be read!");
         for file in dir {
@@ -233,6 +230,7 @@ async fn auth_layer(
     let now = Instant::now();
     let security_wait =
         tokio::time::sleep_until(now.checked_add(Duration::from_millis(30)).unwrap_or(now));
+    #[allow(clippy::branches_sharing_code)]
     if cookies
         .get("questions-auth")
         .is_some_and(|provided| tokens.contains(provided.value()))
@@ -278,7 +276,7 @@ struct AuthPageArgs {
     bad: bool,
 }
 
-fn default_false() -> bool {
+const fn default_false() -> bool {
     false
 }
 
@@ -453,11 +451,7 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
 
     let status = format!("{}\n{}", answer.question, answer.answer);
 
-    let spoiler_text = if let Some(cw) = answer.content_warning {
-        Cow::Owned(format!("anonymous question response (cw {cw})"))
-    } else {
-        Cow::Borrowed("anonymous question response")
-    };
+    let spoiler_text = answer.content_warning.map_or(Cow::Borrowed("anonymous question response"), |cw| Cow::Owned(format!("anonymous question response (cw {cw})")));
 
     let post = MastodonPost {
         status,
