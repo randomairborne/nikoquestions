@@ -60,6 +60,7 @@ const DEFAULT_ASSETS: [(&str, HeaderValue, Bytes); 2] = [
 ];
 
 const MAX_QUESTION_LEN: usize = 10_000;
+const MAX_CW_LEN: usize = 100;
 
 fn main() {
     let config_path = std::env::args()
@@ -338,10 +339,15 @@ async fn ask_question(
 ) -> Result<Redirect, Error> {
     let now = now_secs();
     let question_trim = question.question.trim();
+    let cw_trim = question.content_warning.trim();
 
     if question_trim.len() > MAX_QUESTION_LEN {
         return Err(Error::TooLong);
     }
+    if cw_trim.len() > MAX_CW_LEN {
+        return Err(Error::TooLong);
+    }
+    
     if question_trim.is_empty() {
         return Err(Error::TooShort);
     }
