@@ -2,15 +2,15 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
-    net::SocketAddr,
-    str::FromStr,
+    net::{IpAddr, SocketAddr},
+    ops::Deref,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
 };
 
 use axum::{
-    extract::{Path, Query, Request, State},
-    http::{HeaderName, StatusCode},
+    extract::{ConnectInfo, FromRequestParts, Path, Query, Request, State},
+    http::{request::Parts, HeaderName, StatusCode},
     middleware::Next,
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -19,7 +19,7 @@ use axum::{
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use blake3::Hash;
 use bytes::Bytes;
-use dashmap::DashSet;
+use dashmap::{DashMap, DashSet, Entry};
 use mime_guess::MimeGuess;
 use rand::{distributions::Alphanumeric, Rng};
 use reqwest::{
@@ -73,32 +73,6 @@ fn main() {
     let tera = gen_tera(&config);
     let static_files = gen_static_files(&config);
 
-    let tokens = Arc::new(DashSet::new());
-
-    let policy = [
-        CspSource::Nonce,
-        CspSource::StrictDynamic,
-        CspSource::Scheme(CspSchemeSource::Https),
-        CspSource::UnsafeInline,
-    ];
-    let csp = tower_sombrero::Sombrero::default().content_security_policy(
-        ContentSecurityPolicy::strict_default()
-            .style_src(policy.clone())
-            .script_src(policy),
-    );
-
-    let auth_layer = axum::middleware::from_fn_with_state(tokens.clone(), auth_layer);
-    let router = Router::new()
-        .route("/answer", get(answer_page).post(answer_form))
-        .route("/delete", post(delete_question))
-        .layer(auth_layer)
-        .route("/", get(get_questions).post(ask_question))
-        .route("/auth", get(auth_page).post(auth_set))
-        .layer(csp)
-        .route("/assets/:filename", get(asset));
-
-    let addr = SocketAddr::from_str(&config.bind_address).expect("Failed to parse bind address");
-
     let rt = RuntimeBuilder::new_current_thread()
         .enable_all()
         .thread_name("niko-questions-main")
@@ -124,33 +98,59 @@ fn main() {
         db
     });
 
-    let state = AppState {
+    let state = InnerAppState {
         db: database_conn,
-        tera: Arc::new(tera),
+        tera,
         client: Client::new(),
         static_files,
+        ip_header: config
+            .ip_header
+            .map(|src| HeaderName::from_bytes(src.as_bytes()).expect("Invalid ip_header value")),
         mastodon_config: config.mastodon.map(|cfg| RemoteServiceState {
-            api_auth: Arc::new(
+            api_auth:
                 HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
                     .expect("Invalid token bytes"),
-            ),
+
             api_url: format!("{}/api/v1/statuses", cfg.api_url).into(),
         }),
         ntfy_config: config.ntfy.map(|cfg| RemoteServiceState {
-            api_auth: Arc::new(
+            api_auth:
                 HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
-                    .expect("Invalid token bytes"),
-            ),
+                    .expect("Invalid token bytes")
+            ,
             api_url: cfg.api_url.into(),
         }),
         password_hash: blake3::hash(config.password.as_bytes()),
-        tokens,
+        tokens: DashSet::new(),
+        questions: RatelimitState::new(config.ask_cooldown),
+        auths: RatelimitState::new(config.auth_cooldown),
     };
+    let state = AppState(Arc::new(state));
 
-    let router = router.with_state(state);
+    let policy = [
+        CspSource::Nonce,
+        CspSource::StrictDynamic,
+        CspSource::Scheme(CspSchemeSource::Https),
+        CspSource::UnsafeInline,
+    ];
+    let csp = tower_sombrero::Sombrero::default().content_security_policy(
+        ContentSecurityPolicy::strict_default()
+            .style_src(policy.clone())
+            .script_src(policy),
+    );
 
-    let server = rt.spawn(serve(addr, router));
-    println!("Listening on address: {addr}");
+    let auth_layer = axum::middleware::from_fn_with_state(state.clone(), auth_layer);
+    let router = Router::new()
+        .route("/answer", get(answer_page).post(answer_form))
+        .route("/delete", post(delete_question))
+        .layer(auth_layer)
+        .route("/", get(get_questions).post(ask_question))
+        .route("/auth", get(auth_page).post(auth_set))
+        .layer(csp)
+        .route("/assets/:filename", get(asset)).with_state(state);
+
+    let server = rt.spawn(serve(config.bind_address, router));
+    println!("Listening on address: {}", config.bind_address);
     rt.block_on(server)
         .unwrap()
         .expect("Could not start server");
@@ -158,7 +158,7 @@ fn main() {
 
 async fn serve(address: SocketAddr, app: Router) -> Result<(), std::io::Error> {
     let tcp = TcpListener::bind(address).await?;
-    axum::serve(tcp, app)
+    axum::serve(tcp, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(vss::shutdown_signal())
         .await
 }
@@ -187,7 +187,7 @@ fn gen_tera(config: &Config) -> Tera {
 
 static OCTET_STREAM_HDR: HeaderValue = HeaderValue::from_static("application/octet-stream");
 
-fn gen_static_files(config: &Config) -> Arc<HashMap<String, (HeaderValue, Bytes)>> {
+fn gen_static_files(config: &Config) -> HashMap<String, (HeaderValue, Bytes)> {
     let mut files = HashMap::from(DEFAULT_ASSETS.map(|v| (v.0.to_owned(), (v.1.clone(), v.2))));
     if let Some(asset_path) = &config.asset_path {
         let dir = std::fs::read_dir(asset_path).expect("asset_path could not be read!");
@@ -210,7 +210,7 @@ fn gen_static_files(config: &Config) -> Arc<HashMap<String, (HeaderValue, Bytes)
             files.insert(name, (mime_header, Bytes::from_owner(data)));
         }
     };
-    Arc::new(files)
+    files
 }
 
 async fn asset(
@@ -233,23 +233,18 @@ async fn asset(
 }
 
 async fn auth_layer(
-    State(tokens): State<Arc<DashSet<String>>>,
+    State(state): State<AppState>,
     cookies: CookieJar,
     request: Request,
     next: Next,
 ) -> Response {
-    let now = Instant::now();
-    let security_wait =
-        tokio::time::sleep_until(now.checked_add(Duration::from_millis(30)).unwrap_or(now));
     #[allow(clippy::branches_sharing_code)]
     if cookies
         .get("questions-auth")
-        .is_some_and(|provided| tokens.contains(provided.value()))
+        .is_some_and(|provided| state.tokens.contains(provided.value()))
     {
-        security_wait.await;
         next.run(request).await
     } else {
-        security_wait.await;
         Redirect::to("/auth").into_response()
     }
 }
@@ -262,8 +257,12 @@ struct AuthSetArgs {
 async fn auth_set(
     State(state): State<AppState>,
     cookies: CookieJar,
+    rl_key: RatelimitKey,
     Form(args): Form<AuthSetArgs>,
 ) -> (CookieJar, Redirect) {
+    if matches!(state.auths.check_update_limit(rl_key), LimitState::Limited) {
+        return (cookies, Redirect::to("/auth?ratelimited=true"))
+    }
     if blake3::hash(args.password.as_bytes()) == state.password_hash {
         let new_token: String = rand::thread_rng()
             .sample_iter(Alphanumeric)
@@ -285,6 +284,8 @@ async fn auth_set(
 struct AuthPageArgs {
     #[serde(default = "default_false")]
     bad: bool,
+    #[serde(default = "default_false")]
+    ratelimited: bool
 }
 
 const fn default_false() -> bool {
@@ -298,12 +299,22 @@ async fn auth_page(
 ) -> Result<Html<String>, Error> {
     let mut context = Context::new();
     context.insert("bad", &args.bad);
+    context.insert("ratelimited", &args.ratelimited);
     context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("auth.jinja", &context)?))
 }
 
+#[derive(serde::Deserialize)]
+struct GetQuestionsArgs {
+    #[serde(default = "default_false")]
+    ratelimited: bool,
+    #[serde(default = "default_false")]
+    success: bool
+}
+
 async fn get_questions(
     State(state): State<AppState>,
+    Query(args): Query<GetQuestionsArgs>,
     CspNonce(nonce): CspNonce,
 ) -> Result<Html<String>, Error> {
     let answers: Vec<Answer> = query!(
@@ -332,6 +343,8 @@ async fn get_questions(
     .collect();
 
     let mut context = Context::new();
+    context.insert("ratelimited", &args.ratelimited);
+    context.insert("success", &args.success);
     context.insert("answers", &answers);
     context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("index.jinja", &context)?))
@@ -345,8 +358,13 @@ struct FormAskQuestion {
 
 async fn ask_question(
     State(state): State<AppState>,
+    rl_key: RatelimitKey,
     Form(question): Form<FormAskQuestion>,
 ) -> Result<Redirect, Error> {
+    if matches!(state.questions.check_update_limit(rl_key), LimitState::Limited) {
+        return Ok(Redirect::to("/?ratelimited=true"));
+    }
+
     let now = now_secs();
     let question_trim = question.question.trim();
     let cw_trim = question.content_warning.trim();
@@ -383,7 +401,7 @@ async fn ask_question(
     )
     .execute(&state.db)
     .await?;
-    Ok(Redirect::to("/"))
+    Ok(Redirect::to("/?success=true"))
 }
 
 async fn ntfy_question(state: &AppState, question: &str) -> Result<(), Error> {
@@ -536,12 +554,25 @@ fn now_secs() -> i64 {
 }
 
 #[derive(Clone)]
-struct AppState {
+struct AppState(pub Arc<InnerAppState>);
+
+impl Deref for AppState {
+    type Target = InnerAppState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+struct InnerAppState {
     db: SqlitePool,
-    tera: Arc<Tera>,
+    tera: Tera,
     client: Client,
-    static_files: Arc<HashMap<String, (HeaderValue, Bytes)>>,
-    tokens: Arc<DashSet<String>>,
+    static_files: HashMap<String, (HeaderValue, Bytes)>,
+    questions: RatelimitState,
+    auths: RatelimitState,
+    ip_header: Option<HeaderName>,
+    tokens: DashSet<String>,
     password_hash: Hash,
     mastodon_config: Option<RemoteServiceState>,
     ntfy_config: Option<RemoteServiceState>,
@@ -549,13 +580,31 @@ struct AppState {
 
 #[derive(serde::Deserialize)]
 struct Config {
-    bind_address: String,
+    #[serde(default = "default_bind_address")]
+    bind_address: SocketAddr,
     database_path: String,
     template_path: Option<String>,
     asset_path: Option<String>,
+    ip_header: Option<String>,
+    #[serde(default = "default_auth_cooldown")]
+    auth_cooldown: u64,
+    #[serde(default = "default_ask_cooldown")]
+    ask_cooldown: u64,
     password: String,
     mastodon: Option<RemoteServiceConfig>,
     ntfy: Option<RemoteServiceConfig>,
+}
+
+const fn default_auth_cooldown() -> u64 {
+    30
+}
+
+const fn default_ask_cooldown() -> u64 {
+    300
+}
+
+fn default_bind_address() -> SocketAddr {
+    ([0, 0, 0, 0], 8080).into()
 }
 
 #[derive(serde::Deserialize)]
@@ -564,10 +613,74 @@ struct RemoteServiceConfig {
     api_url: String,
 }
 
-#[derive(Clone)]
 struct RemoteServiceState {
-    api_auth: Arc<HeaderValue>,
-    api_url: Arc<str>,
+    api_auth: HeaderValue,
+    api_url: Box<str>,
+}
+
+#[derive(Debug)]
+struct RatelimitState {
+    attempts: DashMap<RatelimitKey, Instant>,
+    cooldown: Duration,
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+enum LimitState {
+    Limited,
+    Passed
+}
+
+impl RatelimitState {
+    fn new(secs: u64) -> Self {
+        Self {
+            attempts: DashMap::new(),
+            cooldown: Duration::from_secs(secs),
+        }
+    }
+    fn check_update_limit(&self, key: RatelimitKey) -> LimitState {
+        match self.attempts.entry(key) {
+            Entry::Occupied(mut e) => {
+                if e.get().elapsed() > self.cooldown {
+                    e.insert(Instant::now());
+                    LimitState::Passed
+                } else {
+                    LimitState::Limited
+                }
+            }
+            Entry::Vacant(e) => {
+                e.insert(Instant::now());
+                LimitState::Passed
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+enum RatelimitKey {
+    Ip(IpAddr),
+    Header(HeaderValue),
+}
+
+#[axum::async_trait]
+impl FromRequestParts<AppState> for RatelimitKey {
+    type Rejection = Error;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let ip = if let Some(hdr) = &state.ip_header {
+            Self::Header(parts.headers.remove(hdr).ok_or(Error::NoIpAddr)?)
+        } else {
+            Self::Ip(
+                ConnectInfo::<SocketAddr>::from_request_parts(parts, &())
+                    .await
+                    .map_err(|_| Error::IpExtractConnectInfo)?.ip()
+                    .to_canonical(),
+            )
+        };
+        Ok(ip)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -578,12 +691,18 @@ enum Error {
     Sqlx(#[from] sqlx::Error),
     #[error("HTTP error")]
     Http(#[from] reqwest::Error),
+    #[error("Header-to-string error")]
+    HeaderToStr(#[from] axum::http::header::ToStrError),
+    #[error("IP extraction error")]
+    IpExtractConnectInfo,
     #[error("Too long!")]
     TooLong,
     #[error("Too short!")]
     TooShort,
     #[error("No newlines allowed!")]
     NoNewlines,
+    #[error("No IP address provided!")]
+    NoIpAddr,
 }
 
 impl IntoResponse for Error {

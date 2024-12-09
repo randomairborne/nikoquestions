@@ -1,7 +1,23 @@
-bind_address = "0.0.0.0:8080"
 database_path = "nq.db"
 password = "password"
-template_path = "templates"
+
+### Optional path to user-provided templates
+# template_path = "templates"
+
+### Optional path to user-provided asset directory. Must not have symlinks or subdirectories.
+# asset_path = "assets"
+
+### (recommended) IP address header to ratelimit by. Directly used as the limit key, so IP hashes are fine.
+# ip_header = "x-real-ip"
+
+### How long IPs must wait between auth tries. Defaults to 30s.
+# auth_cooldown = 30
+
+### How long IPs must wait before asking another question. Defaults to 300s.
+# ask_cooldown = 300
+
+### Alternate bind address
+# bind_address = "0.0.0.0:8080"
 
 ### Optional Mastodon API integration to autopost responses
 # Generate an API token at https://your.domain/settings/applications

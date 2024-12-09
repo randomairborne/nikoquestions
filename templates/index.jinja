@@ -2,6 +2,14 @@
 {% import "macros.jinja" as macros %}
 {% block body %}
   <h1>Leave an anonymous message</h1>
+  {% if ratelimited %}
+    <h2>
+      You have been ratelimited, please wait a moment before submitting again.
+    </h2>
+  {% endif %}
+  {% if success %}
+    <h2>Successfully submitted post! It will show here when answered.</h2>
+  {% endif %}
   <form method="post" class="ask-question">
     <div>
       <label for="question">What's your question?</label>

@@ -4,6 +4,12 @@
     {% if bad %}
       <span>Bad password!</span><br />
     {% endif %}
+    {% if ratelimited %}
+      <span
+        >You have been ratelimited, please wait a moment before submitting
+        again.</span
+      >
+    {% endif %}
     <label for="password">Password: </label>
     <input type="password" name="password" id="password" required />
     <button type="submit">Submit!</button>
