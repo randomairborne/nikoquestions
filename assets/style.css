@@ -52,14 +52,6 @@ div.question {
   max-width: fit-content;
 }
 
-span.question::before {
-  content: "> ";
-}
-
-summary.question::before {
-  content: "cw ";
-}
-
 div.time {
   font-size: smaller;
 }

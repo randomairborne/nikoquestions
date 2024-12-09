@@ -1,5 +1,6 @@
+use axum::http::StatusCode;
 use axum::{
-    extract::{Query, Request, State},
+    extract::{Path, Query, Request, State},
     http::HeaderName,
     middleware::Next,
     response::{Html, IntoResponse, Redirect, Response},
@@ -8,7 +9,9 @@ use axum::{
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use blake3::Hash;
+use bytes::Bytes;
 use dashmap::DashSet;
+use mime_guess::MimeGuess;
 use rand::{distributions::Alphanumeric, Rng};
 use reqwest::{
     header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE},
@@ -22,20 +25,37 @@ use sqlx::{
 use std::str::FromStr;
 use std::{
     borrow::Cow,
+    collections::HashMap,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
 };
 use tera::{Context, Tera};
 use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder, time::Instant};
+use tower_sombrero::{
+    csp::CspNonce,
+    headers::{ContentSecurityPolicy, CspSource},
+};
 
-const DEFAULT_TEMPLATES: [(&str, &str); 6] = [
+const DEFAULT_TEMPLATES: [(&str, &str); 5] = [
     ("base.jinja", include_str!("../templates/base.jinja")),
     ("index.jinja", include_str!("../templates/index.jinja")),
     ("answer.jinja", include_str!("../templates/answer.jinja")),
     ("auth.jinja", include_str!("../templates/auth.jinja")),
     ("macros.jinja", include_str!("../templates/macros.jinja")),
-    ("style.css", include_str!("../templates/style.css")),
+];
+
+const DEFAULT_ASSETS: [(&str, HeaderValue, Bytes); 2] = [
+    (
+        "dates.js",
+        HeaderValue::from_static("text/javascript;charset=utf-8"),
+        Bytes::from_static(include_bytes!("../assets/dates.js")),
+    ),
+    (
+        "style.css",
+        HeaderValue::from_static("text/css;charset=utf-8"),
+        Bytes::from_static(include_bytes!("../assets/style.css")),
+    ),
 ];
 
 const MAX_QUESTION_LEN: usize = 10_000;
@@ -48,28 +68,26 @@ fn main() {
         .unwrap_or_else(|err| panic!("Could not read {config_path}: {err}"));
     let config: Config = toml::from_str(&config).expect("Invalid config file");
 
-    let templates = if let Some(path) = config.template_path {
-        let mut tera = Tera::new(&format!("{path}/**/*.{{jinja,css}}")).expect("Tera parse failed");
-
-        tera.autoescape_on(vec![".html", ".jinja"]);
-        tera
-    } else {
-        let mut tera = Tera::default();
-        tera.add_raw_templates(DEFAULT_TEMPLATES).unwrap();
-        tera.autoescape_on(vec![".html", ".jinja"]);
-        tera
-    };
+    let tera = gen_tera(&config);
+    let static_files = gen_static_files(&config);
 
     let tokens = Arc::new(DashSet::new());
+
+    let csp = tower_sombrero::Sombrero::default().content_security_policy(
+        ContentSecurityPolicy::strict_default()
+            .style_src([CspSource::Nonce, CspSource::UnsafeInline])
+            .script_src([CspSource::Nonce, CspSource::UnsafeInline]),
+    );
 
     let auth_layer = axum::middleware::from_fn_with_state(tokens.clone(), auth_layer);
     let router = Router::new()
         .route("/answer", get(answer_page).post(answer_form))
         .route("/delete", post(delete_question))
         .layer(auth_layer)
-        .route("/style.css", get(style))
         .route("/", get(get_questions).post(ask_question))
-        .route("/auth", get(auth_page).post(auth_set));
+        .route("/auth", get(auth_page).post(auth_set))
+        .layer(csp)
+        .route("/assets/:filename", get(asset));
 
     let addr = SocketAddr::from_str(&config.bind_address).expect("Failed to parse bind address");
 
@@ -100,8 +118,9 @@ fn main() {
 
     let state = AppState {
         db: database_conn,
-        tera: Arc::new(templates),
+        tera: Arc::new(tera),
         client: Client::new(),
+        static_files,
         mastodon_config: config.mastodon.map(|cfg| RemoteServiceState {
             api_auth: Arc::new(
                 HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
@@ -131,7 +150,78 @@ fn main() {
 
 async fn serve(address: SocketAddr, app: Router) -> Result<(), std::io::Error> {
     let tcp = TcpListener::bind(address).await?;
-    axum::serve(tcp, app).await
+    axum::serve(tcp, app)
+        .with_graceful_shutdown(vss::shutdown_signal())
+        .await
+}
+
+fn gen_tera(config: &Config) -> Tera {
+    let mut tera = if let Some(path) = &config.template_path {
+        Tera::new(&format!("{path}/**/*.jinja")).expect("Tera parse failed")
+    } else {
+        Tera::default()
+    };
+
+    tera.autoescape_on(vec![".html", ".jinja"]);
+
+    let default_tera = {
+        let mut tera = Tera::default();
+        tera.add_raw_templates(DEFAULT_TEMPLATES)
+            .expect("Default templates invalid");
+        tera
+    };
+
+    tera.extend(&default_tera)
+        .expect("Failed to extend with default templates");
+    tera
+}
+
+static OCTET_STREAM_HDR: HeaderValue = HeaderValue::from_static("application/octet-stream");
+
+fn gen_static_files(config: &Config) -> Arc<HashMap<String, (HeaderValue, Bytes)>> {
+    let mut files =
+        HashMap::from(DEFAULT_ASSETS.map(|v| (v.0.to_owned(), (v.1.to_owned(), v.2.to_owned()))));
+    if let Some(asset_path) = &config.asset_path {
+        let dir = std::fs::read_dir(asset_path).expect("asset_path could not be read!");
+        for file in dir {
+            let file = file.expect("Failed to read directory entry");
+            let path = file.path();
+            let name = file
+                .file_name()
+                .into_string()
+                .expect("File name was not valid UTF-8");
+            let data = std::fs::read(&path)
+                .unwrap_or_else(|_| panic!("Failed to open file {}", path.display()));
+            let mime_header = MimeGuess::from_path(&path).first_raw().map_or_else(
+                || OCTET_STREAM_HDR.clone(),
+                |v| {
+                    HeaderValue::from_bytes(v.as_bytes())
+                        .unwrap_or_else(|_| OCTET_STREAM_HDR.clone())
+                },
+            );
+            files.insert(name, (mime_header, Bytes::from_owner(data)));
+        }
+    };
+    Arc::new(files)
+}
+
+async fn asset(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> (StatusCode, Option<[(HeaderName, HeaderValue); 1]>, Bytes) {
+    if let Some((mime, file)) = state.static_files.get(&path) {
+        (
+            StatusCode::OK,
+            Some([(CONTENT_TYPE, mime.clone())]),
+            file.clone(),
+        )
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            None,
+            Bytes::from_static(b"not found"),
+        )
+    }
 }
 
 async fn auth_layer(
@@ -195,13 +285,18 @@ fn default_false() -> bool {
 async fn auth_page(
     State(state): State<AppState>,
     Query(args): Query<AuthPageArgs>,
+    CspNonce(nonce): CspNonce,
 ) -> Result<Html<String>, Error> {
     let mut context = Context::new();
     context.insert("bad", &args.bad);
+    context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("auth.jinja", &context)?))
 }
 
-async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Error> {
+async fn get_questions(
+    State(state): State<AppState>,
+    CspNonce(nonce): CspNonce,
+) -> Result<Html<String>, Error> {
     let answers: Vec<Answer> = query!(
         "SELECT questions.id, questions.question, questions.submitted_time, \
         questions.content_warning, answers.answer, answers.answer_time \
@@ -229,6 +324,7 @@ async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Er
 
     let mut context = Context::new();
     context.insert("answers", &answers);
+    context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("index.jinja", &context)?))
 }
 
@@ -381,7 +477,10 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
     Ok(())
 }
 
-async fn answer_page(State(state): State<AppState>) -> Result<Html<String>, Error> {
+async fn answer_page(
+    State(state): State<AppState>,
+    CspNonce(nonce): CspNonce,
+) -> Result<Html<String>, Error> {
     let questions: Vec<Question> = query!(
         "SELECT questions.id, questions.question, \
         questions.submitted_time, questions.content_warning \
@@ -402,6 +501,7 @@ async fn answer_page(State(state): State<AppState>) -> Result<Html<String>, Erro
 
     let mut context = Context::new();
     context.insert("questions", &questions);
+    context.insert("nonce", &nonce);
     Ok(Html(state.tera.render("answer.jinja", &context)?))
 }
 
@@ -415,14 +515,6 @@ async fn delete_question(
     Ok(Redirect::to("/answer"))
 }
 
-async fn style(
-    State(state): State<AppState>,
-) -> Result<([(HeaderName, HeaderValue); 1], String), Error> {
-    let css = state.tera.render("style.css", &Context::new())?;
-    static CSS_CTYPE: HeaderValue = HeaderValue::from_static("text/css;charset=utf-8");
-    Ok(([(CONTENT_TYPE, CSS_CTYPE.clone())], css))
-}
-
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -434,6 +526,7 @@ struct AppState {
     db: SqlitePool,
     tera: Arc<Tera>,
     client: Client,
+    static_files: Arc<HashMap<String, (HeaderValue, Bytes)>>,
     tokens: Arc<DashSet<String>>,
     password_hash: Hash,
     mastodon_config: Option<RemoteServiceState>,
@@ -445,6 +538,7 @@ struct Config {
     bind_address: String,
     database_path: String,
     template_path: Option<String>,
+    asset_path: Option<String>,
     password: String,
     mastodon: Option<RemoteServiceConfig>,
     ntfy: Option<RemoteServiceConfig>,

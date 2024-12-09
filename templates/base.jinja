@@ -1,14 +1,12 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Q &amp; A</title>
-    <link href="/style.css" rel="stylesheet" />
+    <link href="/assets/style.css" rel="stylesheet" nonce="{{ nonce }}"/>
+    <script src="/assets/dates.js" nonce="{{ nonce }}" async defer></script>
   </head>
   <body>
     {% block body %}{% endblock %}
   </body>
-  <script>
-    document.querySelectorAll('[data-timestamp]').forEach((elm) => {elm.innerHTML = new Date(parseInt(elm.dataset.timestamp) * 1000).toLocaleString()})
-  </script>
 </html>

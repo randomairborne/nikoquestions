@@ -21,7 +21,7 @@
       {% if answer.question.content_warning %}
         <details class="question">
           <summary class="question">
-            {{ answer.question.content_warning }}
+            cw {{ answer.question.content_warning }}
           </summary>
           {{ macros::answer_macro(answer=answer) }}
         </details>
