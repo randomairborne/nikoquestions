@@ -102,14 +102,14 @@ fn main() {
         db: database_conn,
         tera: Arc::new(templates),
         client: Client::new(),
-        mastodon_config: config.mastodon.map(|cfg| MastodonState {
+        mastodon_config: config.mastodon.map(|cfg| RemoteServiceState {
             api_auth: Arc::new(
                 HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
                     .expect("Invalid token bytes"),
             ),
             api_url: format!("{}/api/v1/statuses", cfg.api_url).into(),
         }),
-        ntfy_config: config.ntfy.map(|cfg| NtfyState {
+        ntfy_config: config.ntfy.map(|cfg| RemoteServiceState {
             api_auth: Arc::new(
                 HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
                     .expect("Invalid token bytes"),
@@ -436,8 +436,8 @@ struct AppState {
     client: Client,
     tokens: Arc<DashSet<String>>,
     password_hash: Hash,
-    mastodon_config: Option<MastodonState>,
-    ntfy_config: Option<NtfyState>,
+    mastodon_config: Option<RemoteServiceState>,
+    ntfy_config: Option<RemoteServiceState>,
 }
 
 #[derive(serde::Deserialize)]
@@ -457,13 +457,7 @@ struct RemoteServiceConfig {
 }
 
 #[derive(Clone)]
-struct MastodonState {
-    api_auth: Arc<HeaderValue>,
-    api_url: Arc<str>,
-}
-
-#[derive(Clone)]
-struct NtfyState {
+struct RemoteServiceState {
     api_auth: Arc<HeaderValue>,
     api_url: Arc<str>,
 }
