@@ -207,7 +207,7 @@ async fn get_questions(State(state): State<AppState>) -> Result<Html<String>, Er
         questions.content_warning, answers.answer, answers.answer_time \
         FROM questions \
         LEFT JOIN answers WHERE answers.id = questions.id \
-        ORDER BY answers.answer_time"
+        ORDER BY answers.answer_time DESC"
     )
     .fetch_all(&state.db)
     .await?
