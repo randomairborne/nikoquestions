@@ -35,7 +35,7 @@ use tera::{Context, Tera};
 use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder, time::Instant};
 use tower_sombrero::{
     csp::CspNonce,
-    headers::{ContentSecurityPolicy, CspSource},
+    headers::{ContentSecurityPolicy, CspSchemeSource, CspSource},
 };
 
 const DEFAULT_TEMPLATES: [(&str, &str); 5] = [
@@ -75,10 +75,16 @@ fn main() {
 
     let tokens = Arc::new(DashSet::new());
 
+    let policy = [
+        CspSource::Nonce,
+        CspSource::StrictDynamic,
+        CspSource::Scheme(CspSchemeSource::Https),
+        CspSource::UnsafeInline,
+    ];
     let csp = tower_sombrero::Sombrero::default().content_security_policy(
         ContentSecurityPolicy::strict_default()
-            .style_src([CspSource::Nonce, CspSource::UnsafeInline])
-            .script_src([CspSource::Nonce, CspSource::UnsafeInline]),
+            .style_src(policy.clone())
+            .script_src(policy),
     );
 
     let auth_layer = axum::middleware::from_fn_with_state(tokens.clone(), auth_layer);
@@ -158,7 +164,12 @@ async fn serve(address: SocketAddr, app: Router) -> Result<(), std::io::Error> {
 }
 
 fn gen_tera(config: &Config) -> Tera {
-    let mut tera = config.template_path.as_ref().map_or_else(Tera::default, |path| Tera::new(&format!("{path}/**/*.jinja")).expect("Tera parse failed"));
+    let mut tera = config
+        .template_path
+        .as_ref()
+        .map_or_else(Tera::default, |path| {
+            Tera::new(&format!("{path}/**/*.jinja")).expect("Tera parse failed")
+        });
 
     tera.autoescape_on(vec![".html", ".jinja"]);
 
@@ -177,8 +188,7 @@ fn gen_tera(config: &Config) -> Tera {
 static OCTET_STREAM_HDR: HeaderValue = HeaderValue::from_static("application/octet-stream");
 
 fn gen_static_files(config: &Config) -> Arc<HashMap<String, (HeaderValue, Bytes)>> {
-    let mut files =
-        HashMap::from(DEFAULT_ASSETS.map(|v| (v.0.to_owned(), (v.1.clone(), v.2))));
+    let mut files = HashMap::from(DEFAULT_ASSETS.map(|v| (v.0.to_owned(), (v.1.clone(), v.2))));
     if let Some(asset_path) = &config.asset_path {
         let dir = std::fs::read_dir(asset_path).expect("asset_path could not be read!");
         for file in dir {
@@ -347,7 +357,7 @@ async fn ask_question(
     if cw_trim.len() > MAX_CW_LEN {
         return Err(Error::TooLong);
     }
-    
+
     if question_trim.is_empty() {
         return Err(Error::TooShort);
     }
@@ -457,7 +467,11 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
 
     let status = format!("{}\n{}", answer.question, answer.answer);
 
-    let spoiler_text = answer.content_warning.map_or(Cow::Borrowed("anonymous question response"), |cw| Cow::Owned(format!("anonymous question response (cw {cw})")));
+    let spoiler_text = answer
+        .content_warning
+        .map_or(Cow::Borrowed("anonymous question response"), |cw| {
+            Cow::Owned(format!("anonymous question response (cw {cw})"))
+        });
 
     let post = MastodonPost {
         status,
