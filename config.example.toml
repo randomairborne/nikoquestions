@@ -16,4 +16,4 @@ template_path = "templates"
 # Generate token at https://ntfy.sh/account
 #[ntfy]
 #api_token = ""
-#api_url = "https://ntfy.sh" # No trailing slash!!
+#api_url = "https://ntfy.sh/topic" # No trailing slash!!
