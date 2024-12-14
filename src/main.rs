@@ -272,6 +272,7 @@ async fn auth_set(
         let cookie = Cookie::build(("questions-auth", new_token))
             .http_only(true)
             .secure(true)
+            .max_age(time::Duration::seconds(86400 * 7))
             .build();
         (cookies.add(cookie), Redirect::to("/answer"))
     } else {
