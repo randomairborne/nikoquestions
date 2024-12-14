@@ -19,6 +19,10 @@ password = "password"
 ### Alternate bind address
 # bind_address = "0.0.0.0:8080"
 
+### Used to redirect users in Mastodon posts, if set.
+# root_url = "https://example.com"
+
+
 ### Optional Mastodon API integration to autopost responses
 # Generate an API token at https://your.domain/settings/applications
 # It only needs `write:statuses`

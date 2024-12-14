@@ -121,6 +121,7 @@ fn main() {
         tokens: DashSet::new(),
         questions: RatelimitState::new(config.ask_cooldown),
         auths: RatelimitState::new(config.auth_cooldown),
+        root_url: config.root_url.map(Into::into),
     };
     let state = AppState(Arc::new(state));
 
@@ -485,7 +486,11 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
     .fetch_one(&state.db)
     .await?;
 
-    let status = format!("{}\n{}", answer.question, answer.answer);
+    let from_status = state.root_url.as_ref().map_or(Cow::Borrowed(""), |link| {
+        Cow::Owned(format!("\n\n- from {link}"))
+    });
+
+    let status = format!("> {}\n\n{}{}", answer.question, answer.answer, from_status);
 
     let spoiler_text = answer
         .content_warning
@@ -579,6 +584,7 @@ struct InnerAppState {
     password_hash: Hash,
     mastodon_config: Option<RemoteServiceState>,
     ntfy_config: Option<RemoteServiceState>,
+    root_url: Option<Box<str>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -596,6 +602,7 @@ struct Config {
     password: String,
     mastodon: Option<RemoteServiceConfig>,
     ntfy: Option<RemoteServiceConfig>,
+    root_url: Option<String>,
 }
 
 const fn default_auth_cooldown() -> u64 {
