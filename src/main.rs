@@ -107,17 +107,14 @@ fn main() {
             .ip_header
             .map(|src| HeaderName::from_bytes(src.as_bytes()).expect("Invalid ip_header value")),
         mastodon_config: config.mastodon.map(|cfg| RemoteServiceState {
-            api_auth:
-                HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
-                    .expect("Invalid token bytes"),
+            api_auth: HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
+                .expect("Invalid token bytes"),
 
             api_url: format!("{}/api/v1/statuses", cfg.api_url).into(),
         }),
         ntfy_config: config.ntfy.map(|cfg| RemoteServiceState {
-            api_auth:
-                HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
-                    .expect("Invalid token bytes")
-            ,
+            api_auth: HeaderValue::from_str(&format!("Bearer {}", cfg.api_token))
+                .expect("Invalid token bytes"),
             api_url: cfg.api_url.into(),
         }),
         password_hash: blake3::hash(config.password.as_bytes()),
@@ -147,7 +144,8 @@ fn main() {
         .route("/", get(get_questions).post(ask_question))
         .route("/auth", get(auth_page).post(auth_set))
         .layer(csp)
-        .route("/assets/:filename", get(asset)).with_state(state);
+        .route("/assets/:filename", get(asset))
+        .with_state(state);
 
     let server = rt.spawn(serve(config.bind_address, router));
     println!("Listening on address: {}", config.bind_address);
@@ -261,7 +259,7 @@ async fn auth_set(
     Form(args): Form<AuthSetArgs>,
 ) -> (CookieJar, Redirect) {
     if matches!(state.auths.check_update_limit(rl_key), LimitState::Limited) {
-        return (cookies, Redirect::to("/auth?ratelimited=true"))
+        return (cookies, Redirect::to("/auth?ratelimited=true"));
     }
     if blake3::hash(args.password.as_bytes()) == state.password_hash {
         let new_token: String = rand::thread_rng()
@@ -285,7 +283,7 @@ struct AuthPageArgs {
     #[serde(default = "default_false")]
     bad: bool,
     #[serde(default = "default_false")]
-    ratelimited: bool
+    ratelimited: bool,
 }
 
 const fn default_false() -> bool {
@@ -309,7 +307,7 @@ struct GetQuestionsArgs {
     #[serde(default = "default_false")]
     ratelimited: bool,
     #[serde(default = "default_false")]
-    success: bool
+    success: bool,
 }
 
 async fn get_questions(
@@ -361,7 +359,10 @@ async fn ask_question(
     rl_key: RatelimitKey,
     Form(question): Form<FormAskQuestion>,
 ) -> Result<Redirect, Error> {
-    if matches!(state.questions.check_update_limit(rl_key), LimitState::Limited) {
+    if matches!(
+        state.questions.check_update_limit(rl_key),
+        LimitState::Limited
+    ) {
         return Ok(Redirect::to("/?ratelimited=true"));
     }
 
@@ -468,6 +469,7 @@ struct MastodonPost {
     spoiler_text: Cow<'static, str>,
     language: &'static str,
     visibility: &'static str,
+    content_type: &'static str,
 }
 
 async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
@@ -495,7 +497,8 @@ async fn answer_mastodon(state: &AppState, id: i64) -> Result<(), Error> {
         status,
         spoiler_text,
         language: "en",
-        visibility: "public",
+        visibility: "unlisted",
+        content_type: "text/markdown",
     };
 
     state
@@ -627,7 +630,7 @@ struct RatelimitState {
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 enum LimitState {
     Limited,
-    Passed
+    Passed,
 }
 
 impl RatelimitState {
@@ -637,6 +640,7 @@ impl RatelimitState {
             cooldown: Duration::from_secs(secs),
         }
     }
+
     fn check_update_limit(&self, key: RatelimitKey) -> LimitState {
         match self.attempts.entry(key) {
             Entry::Occupied(mut e) => {
@@ -675,7 +679,8 @@ impl FromRequestParts<AppState> for RatelimitKey {
             Self::Ip(
                 ConnectInfo::<SocketAddr>::from_request_parts(parts, &())
                     .await
-                    .map_err(|_| Error::IpExtractConnectInfo)?.ip()
+                    .map_err(|_| Error::IpExtractConnectInfo)?
+                    .ip()
                     .to_canonical(),
             )
         };
