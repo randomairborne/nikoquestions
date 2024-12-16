@@ -25,17 +25,19 @@
     <h2>No questions yet! Wanna be the first to ask?</h2>
   {% endif %}
   {% for answer in answers %}
-    <div class="question">
-      {% if answer.question.content_warning %}
-        <details class="question">
-          <summary class="question">
-            cw {{ answer.question.content_warning }}
-          </summary>
+    <a href="#question-{{ answer.question.id }}">
+      <div class="question" id="question-{{ answer.question.id }}">
+        {% if answer.question.content_warning %}
+          <details class="question">
+            <summary class="question">
+              cw {{ answer.question.content_warning }}
+            </summary>
+            {{ macros::answer_macro(answer=answer) }}
+          </details>
+        {% else %}
           {{ macros::answer_macro(answer=answer) }}
-        </details>
-      {% else %}
-        {{ macros::answer_macro(answer=answer) }}
-      {% endif %}
-    </div>
+        {% endif %}
+      </div>
+    </a>
   {% endfor %}
 {% endblock body %}

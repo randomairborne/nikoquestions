@@ -28,6 +28,10 @@ input {
   padding: 0.2ch;
 }
 
+a {
+  text-decoration: none;
+}
+
 button {
   font-size: x-large;
   margin: 0.3ch;
