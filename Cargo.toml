@@ -19,5 +19,6 @@ thiserror = "2"
 time = { version = "0.3.37", default-features = false }
 tokio = { version = "1", features = ["rt"] }
 toml = "0.8"
+tower-http = { version = "0.6.2", features = ["compression-full"] }
 tower-sombrero = { version = "0.0.5", features = ["axum"] }
 vss = "0.1"

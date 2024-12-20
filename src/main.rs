@@ -33,6 +33,7 @@ use sqlx::{
 };
 use tera::{Context, Tera};
 use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder, time::Instant};
+use tower_http::compression::CompressionLayer;
 use tower_sombrero::{
     csp::CspNonce,
     headers::{ContentSecurityPolicy, CspSchemeSource, CspSource},
@@ -146,6 +147,7 @@ fn main() {
         .route("/auth", get(auth_page).post(auth_set))
         .layer(csp)
         .route("/assets/:filename", get(asset))
+        .layer(CompressionLayer::new())
         .with_state(state);
 
     let server = rt.spawn(serve(config.bind_address, router));
