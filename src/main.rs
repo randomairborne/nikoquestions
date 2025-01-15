@@ -675,7 +675,6 @@ enum RatelimitKey {
     Header(HeaderValue),
 }
 
-#[axum::async_trait]
 impl FromRequestParts<AppState> for RatelimitKey {
     type Rejection = Error;
 
