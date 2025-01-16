@@ -172,7 +172,7 @@ fn gen_tera(config: &Config) -> Tera {
             Tera::new(&format!("{path}/**/*.jinja")).expect("Tera parse failed")
         });
 
-    tera.autoescape_on(vec![".html", ".jinja"]);
+    tera.autoescape_on(vec![".html", ".jinja", ".jinja2", ".jinja.html"]);
 
     let default_tera = {
         let mut tera = Tera::default();
