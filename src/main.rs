@@ -9,27 +9,26 @@ use std::{
 };
 
 use axum::{
+    Form, Router,
     extract::{ConnectInfo, FromRequestParts, Path, Query, Request, State},
-    http::{request::Parts, HeaderName, StatusCode},
+    http::{HeaderName, StatusCode, request::Parts},
     middleware::Next,
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
-    Form, Router,
 };
-use axum_extra::extract::{cookie::Cookie, CookieJar};
+use axum_extra::extract::{CookieJar, cookie::Cookie};
 use blake3::Hash;
 use bytes::Bytes;
 use dashmap::{DashMap, DashSet, Entry};
 use mime_guess::MimeGuess;
-use rand::{distr::Alphanumeric, Rng};
+use rand::{Rng, distr::Alphanumeric};
 use reqwest::{
-    header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE},
     Client,
+    header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue},
 };
 use sqlx::{
-    query,
+    SqlitePool, query,
     sqlite::{SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
-    SqlitePool,
 };
 use tera::{Context, Tera};
 use tokio::{net::TcpListener, runtime::Builder as RuntimeBuilder, time::Instant};
