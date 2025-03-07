@@ -21,7 +21,7 @@ use blake3::Hash;
 use bytes::Bytes;
 use dashmap::{DashMap, DashSet, Entry};
 use mime_guess::MimeGuess;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, Rng};
 use reqwest::{
     header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE},
     Client,
@@ -265,7 +265,7 @@ async fn auth_set(
         return (cookies, Redirect::to("/auth?ratelimited=true"));
     }
     if blake3::hash(args.password.as_bytes()) == state.password_hash {
-        let new_token: String = rand::thread_rng()
+        let new_token: String = rand::rng()
             .sample_iter(Alphanumeric)
             .take(64)
             .map(|c| c as char)
